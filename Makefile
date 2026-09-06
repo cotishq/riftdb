@@ -13,6 +13,7 @@ build:
 
 migrate:
 	docker compose exec -T postgres psql -U riftdb -d riftdb -f /docker-entrypoint-initdb.d/001_init.sql
+	docker compose exec -T postgres psql -U riftdb -d riftdb -f /docker-entrypoint-initdb.d/002_collection_sync.sql
 
 tidy:
 	go mod tidy

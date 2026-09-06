@@ -17,15 +17,26 @@ var (
 )
 
 type Collection struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description *string   `json:"description,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID             string    `json:"id"`
+	Name           string    `json:"name"`
+	Description    *string   `json:"description,omitempty"`
+	EmbeddingModel string    `json:"embedding_model"`
+	Namespace      string    `json:"namespace"`
+	SourcePrefix   string    `json:"source_prefix"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type CreateParams struct {
+	Name           string
+	Description    *string
+	EmbeddingModel string
+	Namespace      string
+	SourcePrefix   string
 }
 
 type Repository interface {
-	Create(ctx context.Context, name string, description *string) (*Collection, error)
+	Create(ctx context.Context, p CreateParams) (*Collection, error)
 	GetByID(ctx context.Context, id string) (*Collection, error)
 	List(ctx context.Context) ([]Collection, error)
 	Delete(ctx context.Context, id string) error
@@ -39,13 +50,13 @@ func NewRepository(pool *pgxpool.Pool) Repository {
 	return &repository{pool: pool}
 }
 
-func (r *repository) Create(ctx context.Context, name string, description *string) (*Collection, error) {
+func (r *repository) Create(ctx context.Context, p CreateParams) (*Collection, error) {
 	const q = `
-		INSERT INTO collections (name, description)
-		VALUES ($1, $2)
-		RETURNING id, name, description, created_at, updated_at`
+		INSERT INTO collections (name, description, embedding_model, tpuf_namespace, source_prefix)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, name, description, embedding_model, tpuf_namespace, source_prefix, created_at, updated_at`
 
-	c, err := scanCollection(r.pool.QueryRow(ctx, q, name, description))
+	c, err := scanCollection(r.pool.QueryRow(ctx, q, p.Name, p.Description, p.EmbeddingModel, p.Namespace, p.SourcePrefix))
 	if err != nil {
 		if isUniqueViolation(err) {
 			return nil, ErrConflict
@@ -57,7 +68,7 @@ func (r *repository) Create(ctx context.Context, name string, description *strin
 
 func (r *repository) GetByID(ctx context.Context, id string) (*Collection, error) {
 	const q = `
-		SELECT id, name, description, created_at, updated_at
+		SELECT id, name, description, embedding_model, tpuf_namespace, source_prefix, created_at, updated_at
 		FROM collections
 		WHERE id = $1`
 
@@ -73,7 +84,7 @@ func (r *repository) GetByID(ctx context.Context, id string) (*Collection, error
 
 func (r *repository) List(ctx context.Context) ([]Collection, error) {
 	const q = `
-		SELECT id, name, description, created_at, updated_at
+		SELECT id, name, description, embedding_model, tpuf_namespace, source_prefix, created_at, updated_at
 		FROM collections
 		ORDER BY created_at DESC`
 
@@ -114,7 +125,16 @@ type scanner interface {
 
 func scanCollection(s scanner) (*Collection, error) {
 	var c Collection
-	if err := s.Scan(&c.ID, &c.Name, &c.Description, &c.CreatedAt, &c.UpdatedAt); err != nil {
+	if err := s.Scan(
+		&c.ID,
+		&c.Name,
+		&c.Description,
+		&c.EmbeddingModel,
+		&c.Namespace,
+		&c.SourcePrefix,
+		&c.CreatedAt,
+		&c.UpdatedAt,
+	); err != nil {
 		return nil, err
 	}
 	return &c, nil

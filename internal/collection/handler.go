@@ -3,6 +3,8 @@ package collection
 import (
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -17,30 +19,53 @@ func NewHandler(svc Service) *Handler {
 }
 
 type createRequest struct {
-	Name        string  `json:"name"`
-	Description *string `json:"description"`
+	Name           string  `json:"name"`
+	Description    *string `json:"description"`
+	EmbeddingModel string  `json:"embedding_model"`
+	Namespace      string  `json:"namespace"`
+	SourcePrefix   string  `json:"source_prefix"`
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+
 	var req createRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
 		writeError(w, http.StatusBadRequest, "invalid json body")
 		return
 	}
 
-	c, err := h.svc.Create(r.Context(), req.Name, req.Description)
+	c, err := h.svc.Create(r.Context(), CreateInput{
+		Name:           req.Name,
+		Description:    req.Description,
+		EmbeddingModel: req.EmbeddingModel,
+		Namespace:      req.Namespace,
+		SourcePrefix:   req.SourcePrefix,
+	})
 	if err != nil {
 		switch {
-		case errors.Is(err, ErrInvalidName):
+		case errors.Is(err, ErrInvalidName), errors.Is(err, ErrInvalidNameFormat):
 			writeError(w, http.StatusBadRequest, err.Error())
 		case errors.Is(err, ErrConflict):
 			writeError(w, http.StatusConflict, err.Error())
 		default:
+			slog.Error("create collection", "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to create collection")
 		}
 		return
 	}
 
+	slog.Info("collection created",
+		"id", c.ID,
+		"name", c.Name,
+		"namespace", c.Namespace,
+		"embedding_model", c.EmbeddingModel,
+	)
 	writeJSON(w, http.StatusCreated, c)
 }
 

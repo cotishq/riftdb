@@ -3,16 +3,32 @@ package collection
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 )
 
-var ErrInvalidName = errors.New("collection name is required")
+const defaultEmbeddingModel = "nomic-embed-text"
+
+var (
+	ErrInvalidName       = errors.New("collection name is required")
+	ErrInvalidNameFormat = errors.New("collection name must be a DNS label: lowercase letters, digits, hyphens")
+)
+
+var namePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
 type Service interface {
-	Create(ctx context.Context, name string, description *string) (*Collection, error)
+	Create(ctx context.Context, in CreateInput) (*Collection, error)
 	Get(ctx context.Context, id string) (*Collection, error)
 	List(ctx context.Context) ([]Collection, error)
 	Delete(ctx context.Context, id string) error
+}
+
+type CreateInput struct {
+	Name           string
+	Description    *string
+	EmbeddingModel string
+	Namespace      string
+	SourcePrefix   string
 }
 
 type service struct {
@@ -23,20 +39,46 @@ func NewService(repo Repository) Service {
 	return &service{repo: repo}
 }
 
-func (s *service) Create(ctx context.Context, name string, description *string) (*Collection, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
+func (s *service) Create(ctx context.Context, in CreateInput) (*Collection, error) {
+	in.Name = strings.TrimSpace(in.Name)
+	if in.Name == "" {
 		return nil, ErrInvalidName
 	}
-	if description != nil {
-		trimmed := strings.TrimSpace(*description)
+	if !namePattern.MatchString(in.Name) {
+		return nil, ErrInvalidNameFormat
+	}
+
+	if in.Description != nil {
+		trimmed := strings.TrimSpace(*in.Description)
 		if trimmed == "" {
-			description = nil
+			in.Description = nil
 		} else {
-			description = &trimmed
+			in.Description = &trimmed
 		}
 	}
-	return s.repo.Create(ctx, name, description)
+
+	in.EmbeddingModel = strings.TrimSpace(in.EmbeddingModel)
+	if in.EmbeddingModel == "" {
+		in.EmbeddingModel = defaultEmbeddingModel
+	}
+
+	in.Namespace = strings.TrimSpace(in.Namespace)
+	if in.Namespace == "" {
+		in.Namespace = in.Name
+	}
+
+	in.SourcePrefix = strings.Trim(strings.TrimSpace(in.SourcePrefix), "/")
+	if in.SourcePrefix == "" {
+		in.SourcePrefix = "collections/" + in.Name
+	}
+
+	return s.repo.Create(ctx, CreateParams{
+		Name:           in.Name,
+		Description:    in.Description,
+		EmbeddingModel: in.EmbeddingModel,
+		Namespace:      in.Namespace,
+		SourcePrefix:   in.SourcePrefix,
+	})
 }
 
 func (s *service) Get(ctx context.Context, id string) (*Collection, error) {
