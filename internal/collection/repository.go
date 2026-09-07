@@ -77,6 +77,9 @@ func (r *repository) GetByID(ctx context.Context, id string) (*Collection, error
 		return nil, ErrNotFound
 	}
 	if err != nil {
+		if isInvalidTextRepresentation(err) {
+			return nil, ErrInvalidID
+		}
 		return nil, fmt.Errorf("get collection: %w", err)
 	}
 	return c, nil
@@ -143,4 +146,9 @@ func scanCollection(s scanner) (*Collection, error) {
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+func isInvalidTextRepresentation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "22P02"
 }

@@ -7,8 +7,10 @@ import (
 )
 
 type stubRepo struct {
-	last CreateParams
-	err  error
+	last   CreateParams
+	byID   map[string]*Collection
+	err    error
+	getErr error
 }
 
 func (s *stubRepo) Create(_ context.Context, p CreateParams) (*Collection, error) {
@@ -28,9 +30,19 @@ func (s *stubRepo) Create(_ context.Context, p CreateParams) (*Collection, error
 	}, nil
 }
 
-func (s *stubRepo) GetByID(context.Context, string) (*Collection, error) { return nil, ErrNotFound }
-func (s *stubRepo) List(context.Context) ([]Collection, error)           { return nil, nil }
-func (s *stubRepo) Delete(context.Context, string) error                 { return nil }
+func (s *stubRepo) GetByID(_ context.Context, id string) (*Collection, error) {
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	if s.byID != nil {
+		if c, ok := s.byID[id]; ok {
+			return c, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+func (s *stubRepo) List(context.Context) ([]Collection, error) { return nil, nil }
+func (s *stubRepo) Delete(context.Context, string) error       { return nil }
 
 func TestCreateAppliesDefaults(t *testing.T) {
 	repo := &stubRepo{}
@@ -66,5 +78,34 @@ func TestCreateConflict(t *testing.T) {
 	svc := NewService(&stubRepo{err: ErrConflict})
 	if _, err := svc.Create(context.Background(), CreateInput{Name: "papers"}); err != ErrConflict {
 		t.Fatalf("conflict: got %v", err)
+	}
+}
+
+func TestGetCollection(t *testing.T) {
+	id := "00000000-0000-0000-0000-000000000001"
+	svc := NewService(&stubRepo{byID: map[string]*Collection{
+		id: {ID: id, Name: "papers"},
+	}})
+
+	got, err := svc.Get(context.Background(), " "+id+" ")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Name != "papers" {
+		t.Fatalf("name: got %q", got.Name)
+	}
+}
+
+func TestGetRejectsInvalidID(t *testing.T) {
+	svc := NewService(&stubRepo{})
+	if _, err := svc.Get(context.Background(), "papers"); err != ErrInvalidID {
+		t.Fatalf("invalid id: got %v", err)
+	}
+}
+
+func TestGetNotFound(t *testing.T) {
+	svc := NewService(&stubRepo{})
+	if _, err := svc.Get(context.Background(), "00000000-0000-0000-0000-000000000099"); err != ErrNotFound {
+		t.Fatalf("missing: got %v", err)
 	}
 }

@@ -72,13 +72,18 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	c, err := h.svc.Get(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
+		switch {
+		case errors.Is(err, ErrInvalidID):
+			writeError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, ErrNotFound):
 			writeError(w, http.StatusNotFound, err.Error())
-			return
+		default:
+			slog.Error("get collection", "error", err, "id", chi.URLParam(r, "id"))
+			writeError(w, http.StatusInternalServerError, "failed to get collection")
 		}
-		writeError(w, http.StatusInternalServerError, "failed to get collection")
 		return
 	}
+
 	writeJSON(w, http.StatusOK, c)
 }
 

@@ -12,9 +12,13 @@ const defaultEmbeddingModel = "nomic-embed-text"
 var (
 	ErrInvalidName       = errors.New("collection name is required")
 	ErrInvalidNameFormat = errors.New("collection name must be a DNS label: lowercase letters, digits, hyphens")
+	ErrInvalidID         = errors.New("collection id must be a UUID")
 )
 
-var namePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+var (
+	namePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+	idPattern   = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+)
 
 type Service interface {
 	Create(ctx context.Context, in CreateInput) (*Collection, error)
@@ -82,6 +86,10 @@ func (s *service) Create(ctx context.Context, in CreateInput) (*Collection, erro
 }
 
 func (s *service) Get(ctx context.Context, id string) (*Collection, error) {
+	id = strings.TrimSpace(id)
+	if !idPattern.MatchString(id) {
+		return nil, ErrInvalidID
+	}
 	return s.repo.GetByID(ctx, id)
 }
 
