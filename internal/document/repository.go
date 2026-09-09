@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -53,6 +54,9 @@ func (r *repository) Create(ctx context.Context, p CreateParams) (*Document, err
 
 	d, err := scanDocument(r.pool.QueryRow(ctx, q, p.CollectionID, p.ContentHash, p.R2Key))
 	if err != nil {
+		if isUniqueViolation(err) {
+			return nil, ErrConflict
+		}
 		return nil, fmt.Errorf("create document: %w", err)
 	}
 	return d, nil
@@ -114,6 +118,11 @@ func (r *repository) Delete(ctx context.Context, id string) error {
 
 type scanner interface {
 	Scan(dest ...any) error
+}
+
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 func scanDocument(s scanner) (*Document, error) {

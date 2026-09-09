@@ -12,6 +12,7 @@ import (
 var (
 	ErrInvalidCollection = errors.New("collection id is required")
 	ErrInvalidR2Key      = errors.New("r2_key is required")
+	ErrConflict          = errors.New("document already exists")
 )
 
 type Service interface {

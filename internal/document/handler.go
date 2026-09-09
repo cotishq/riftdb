@@ -34,6 +34,8 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, ErrInvalidCollection), errors.Is(err, ErrInvalidR2Key):
 			writeError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, ErrConflict):
+			writeError(w, http.StatusConflict, err.Error())
 		case isForeignKeyViolation(err):
 			writeError(w, http.StatusNotFound, "collection not found")
 		default:

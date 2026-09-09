@@ -27,9 +27,14 @@ go.work.sum
 # IDE / editor
 .idea/
 .vscode/
+.cursor/
+.cursorrules
 *.swp
 *.swo
 *~
+
+# Local learning logs
+learning/
 
 # OS
 .DS_Store
