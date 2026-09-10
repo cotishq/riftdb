@@ -1,8 +1,9 @@
-.PHONY: run build migrate tidy
+.PHONY: run build migrate tidy list-prefix
 
 APP := riftdb
 BIN := bin/api
 DATABASE_URL ?= postgres://riftdb:riftdb@localhost:5432/riftdb?sslmode=disable
+PREFIX ?= collections/papers
 
 run:
 	go run ./cmd/api
@@ -10,6 +11,10 @@ run:
 build:
 	mkdir -p bin
 	go build -o $(BIN) ./cmd/api
+	go build -o bin/s3list ./cmd/s3list
+
+list-prefix:
+	go run ./cmd/s3list $(PREFIX)
 
 migrate:
 	docker compose exec -T postgres psql -U riftdb -d riftdb -f /docker-entrypoint-initdb.d/001_init.sql

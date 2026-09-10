@@ -17,6 +17,7 @@ import (
 	"github.com/cotishq/riftdb/internal/collection"
 	"github.com/cotishq/riftdb/internal/db"
 	"github.com/cotishq/riftdb/internal/document"
+	"github.com/cotishq/riftdb/internal/storage"
 )
 
 func main() {
@@ -36,6 +37,17 @@ func main() {
 		os.Exit(1)
 	}
 	defer pool.Close()
+
+	store, err := storage.NewS3FromEnv(ctx)
+	if err != nil {
+		logger.Error("failed to configure object storage", "error", err)
+		os.Exit(1)
+	}
+	if err := store.Ping(ctx); err != nil {
+		logger.Error("object storage unreachable", "error", err, "bucket", store.Bucket(), "endpoint", store.Endpoint())
+		os.Exit(1)
+	}
+	logger.Info("object storage ready", "bucket", store.Bucket(), "endpoint", store.Endpoint())
 
 	collRepo := collection.NewRepository(pool)
 	collSvc := collection.NewService(collRepo)
