@@ -163,3 +163,78 @@ func TestReconcileRequiresCollectionAndPrefix(t *testing.T) {
 		t.Fatalf("missing prefix: got %v", err)
 	}
 }
+
+func others() collection.Collection {
+	return collection.Collection{
+		ID:           "other-uuid",
+		Name:         "other",
+		SourcePrefix: "collections/other",
+	}
+}
+
+func TestReconcileAllInsertsPerCollection(t *testing.T) {
+	ctx := context.Background()
+	mem := storage.NewMemory()
+	if err := mem.Put(ctx, "collections/papers/notes.txt", []byte("hello")); err != nil {
+		t.Fatal(err)
+	}
+	if err := mem.Put(ctx, "collections/other/notes.txt", []byte("other")); err != nil {
+		t.Fatal(err)
+	}
+	docs := newFakeDocs()
+	r := New(mem, docs)
+
+	n, err := r.ReconcileAll(ctx, []collection.Collection{papers(), others()})
+	if err != nil {
+		t.Fatalf("ReconcileAll: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("inserted: got %d, want 2", n)
+	}
+	for _, id := range []string{"papers-uuid", "other-uuid"} {
+		listed, err := docs.List(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(listed) != 1 {
+			t.Fatalf("%s documents: got %d, want 1", id, len(listed))
+		}
+	}
+}
+
+func TestReconcileAllEmpty(t *testing.T) {
+	n, err := New(storage.NewMemory(), newFakeDocs()).ReconcileAll(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("inserted: got %d, want 0", n)
+	}
+}
+
+func TestRunOnceListsCollections(t *testing.T) {
+	ctx := context.Background()
+	mem := storage.NewMemory()
+	if err := mem.Put(ctx, "collections/papers/notes.txt", []byte("hello")); err != nil {
+		t.Fatal(err)
+	}
+	docs := newFakeDocs()
+	r := New(mem, docs)
+
+	n, err := r.RunOnce(ctx, func(context.Context) ([]collection.Collection, error) {
+		return []collection.Collection{papers()}, nil
+	})
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("inserted: got %d, want 1", n)
+	}
+}
+
+func TestRunOnceRequiresLister(t *testing.T) {
+	_, err := New(storage.NewMemory(), newFakeDocs()).RunOnce(context.Background(), nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}

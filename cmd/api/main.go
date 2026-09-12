@@ -17,6 +17,7 @@ import (
 	"github.com/cotishq/riftdb/internal/collection"
 	"github.com/cotishq/riftdb/internal/db"
 	"github.com/cotishq/riftdb/internal/document"
+	"github.com/cotishq/riftdb/internal/reconcile"
 	"github.com/cotishq/riftdb/internal/storage"
 )
 
@@ -56,6 +57,11 @@ func main() {
 	docRepo := document.NewRepository(pool)
 	docSvc := document.NewService(docRepo)
 	docHandler := document.NewHandler(docSvc)
+
+	rec := reconcile.New(store, docSvc)
+	interval := parseInterval(getenv("RECONCILE_INTERVAL", "30s"))
+	go rec.Loop(ctx, interval, collSvc.List)
+	logger.Info("reconciler started", "interval", interval)
 
 	router := api.NewRouter(pool, collHandler, docHandler)
 
@@ -98,6 +104,14 @@ func getenv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func parseInterval(s string) time.Duration {
+	d, err := time.ParseDuration(s)
+	if err != nil || d <= 0 {
+		return 30 * time.Second
+	}
+	return d
 }
 
 func parseLogLevel(level string) slog.Level {

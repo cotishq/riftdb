@@ -1,4 +1,4 @@
-.PHONY: run build migrate tidy list-prefix
+.PHONY: run build migrate tidy list-prefix reconcile
 
 APP := riftdb
 BIN := bin/api
@@ -12,9 +12,13 @@ build:
 	mkdir -p bin
 	go build -o $(BIN) ./cmd/api
 	go build -o bin/s3list ./cmd/s3list
+	go build -o bin/reconcile ./cmd/reconcile
 
 list-prefix:
 	go run ./cmd/s3list $(PREFIX)
+
+reconcile:
+	go run ./cmd/reconcile
 
 migrate:
 	docker compose exec -T postgres psql -U riftdb -d riftdb -f /docker-entrypoint-initdb.d/001_init.sql

@@ -4,12 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/cotishq/riftdb/internal/collection"
 	"github.com/cotishq/riftdb/internal/document"
 	"github.com/cotishq/riftdb/internal/storage"
 )
+
+type CollectionLister func(context.Context) ([]collection.Collection, error)
 
 var (
 	ErrInvalidCollection = errors.New("collection id is required")
@@ -83,6 +87,60 @@ func (r *Reconciler) Reconcile(ctx context.Context, coll collection.Collection) 
 	}
 
 	return inserted, nil
+}
+
+// ReconcileAll runs Reconcile for each collection. Stops on the first error.
+func (r *Reconciler) ReconcileAll(ctx context.Context, collections []collection.Collection) (int, error) {
+	inserted := 0
+	for _, coll := range collections {
+		n, err := r.Reconcile(ctx, coll)
+		inserted += n
+		if err != nil {
+			return inserted, fmt.Errorf("collection %s: %w", coll.ID, err)
+		}
+	}
+	return inserted, nil
+}
+
+// RunOnce lists collections and records any missing objects.
+func (r *Reconciler) RunOnce(ctx context.Context, list CollectionLister) (int, error) {
+	if list == nil {
+		return 0, errors.New("collection lister is required")
+	}
+	collections, err := list(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("list collections: %w", err)
+	}
+	return r.ReconcileAll(ctx, collections)
+}
+
+// Loop runs RunOnce immediately, then on every interval until ctx is cancelled.
+func (r *Reconciler) Loop(ctx context.Context, interval time.Duration, list CollectionLister) {
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+
+	run := func() {
+		n, err := r.RunOnce(ctx, list)
+		if err != nil {
+			slog.Error("reconcile failed", "error", err, "inserted", n)
+			return
+		}
+		slog.Info("reconcile complete", "inserted", n)
+	}
+
+	run()
+	t := time.NewTicker(interval)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			run()
+		}
+	}
 }
 
 func underPrefix(key, prefix string) bool {
