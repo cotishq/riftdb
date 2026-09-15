@@ -19,6 +19,7 @@ import (
 	"github.com/cotishq/riftdb/internal/document"
 	"github.com/cotishq/riftdb/internal/reconcile"
 	"github.com/cotishq/riftdb/internal/storage"
+	"github.com/cotishq/riftdb/internal/worker"
 )
 
 func main() {
@@ -50,6 +51,19 @@ func main() {
 	}
 	logger.Info("object storage ready", "bucket", store.Bucket(), "endpoint", store.Endpoint())
 
+	redisAddr := getenv("REDIS_ADDR", "localhost:6379")
+	jobs := worker.NewClient(redisAddr)
+	defer jobs.Close()
+
+	w := worker.New(redisAddr)
+	go func() {
+		if err := w.Start(); err != nil {
+			logger.Error("worker stopped", "error", err)
+		}
+	}()
+	defer w.Shutdown()
+	logger.Info("worker started", "redis", redisAddr)
+
 	collRepo := collection.NewRepository(pool)
 	collSvc := collection.NewService(collRepo)
 	collHandler := collection.NewHandler(collSvc)
@@ -58,7 +72,7 @@ func main() {
 	docSvc := document.NewService(docRepo)
 	docHandler := document.NewHandler(docSvc)
 
-	rec := reconcile.New(store, docSvc)
+	rec := reconcile.New(store, docSvc, jobs)
 	interval := parseInterval(getenv("RECONCILE_INTERVAL", "30s"))
 	go rec.Loop(ctx, interval, collSvc.List)
 	logger.Info("reconciler started", "interval", interval)

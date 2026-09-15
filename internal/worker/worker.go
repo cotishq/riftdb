@@ -25,7 +25,7 @@ func New(redisAddr string) *Worker {
 	)
 
 	mux := asynq.NewServeMux()
-	// Task handlers (ingest, embed, index) are registered here.
+	mux.HandleFunc(TaskIngest, HandleIngest)
 
 	return &Worker{server: srv, mux: mux}
 }

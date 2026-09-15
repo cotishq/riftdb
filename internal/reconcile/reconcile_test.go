@@ -21,6 +21,31 @@ func newFakeDocs() *fakeDocs {
 	return &fakeDocs{byColl: make(map[string][]document.Document)}
 }
 
+type fakeJobs struct {
+	mu    sync.Mutex
+	docs  []document.Document
+	calls int
+}
+
+func newFakeJobs() *fakeJobs {
+	return &fakeJobs{}
+}
+
+func (f *fakeJobs) EnqueuePending(_ context.Context, doc document.Document) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	f.docs = append(f.docs, doc)
+	return nil
+}
+
+func rec(objects storage.Storage, docs *fakeDocs, jobs *fakeJobs) *Reconciler {
+	if jobs == nil {
+		jobs = newFakeJobs()
+	}
+	return New(objects, docs, jobs)
+}
+
 func (f *fakeDocs) List(_ context.Context, collectionID string) ([]document.Document, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -64,7 +89,8 @@ func TestReconcileInsertsPendingForNewObject(t *testing.T) {
 		t.Fatal(err)
 	}
 	docs := newFakeDocs()
-	r := New(mem, docs)
+	jobs := newFakeJobs()
+	r := rec(mem, docs, jobs)
 
 	n, err := r.Reconcile(ctx, papers())
 	if err != nil {
@@ -87,6 +113,9 @@ func TestReconcileInsertsPendingForNewObject(t *testing.T) {
 	if listed[0].Status != "pending" {
 		t.Fatalf("status: %q", listed[0].Status)
 	}
+	if jobs.calls != 1 {
+		t.Fatalf("enqueue: got %d, want 1", jobs.calls)
+	}
 }
 
 func TestReconcileIsIdempotent(t *testing.T) {
@@ -96,7 +125,8 @@ func TestReconcileIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	docs := newFakeDocs()
-	r := New(mem, docs)
+	jobs := newFakeJobs()
+	r := rec(mem, docs, jobs)
 
 	if _, err := r.Reconcile(ctx, papers()); err != nil {
 		t.Fatalf("first: %v", err)
@@ -110,6 +140,9 @@ func TestReconcileIsIdempotent(t *testing.T) {
 	}
 	if docs.creates != 1 {
 		t.Fatalf("creates: got %d, want 1", docs.creates)
+	}
+	if jobs.calls != 2 {
+		t.Fatalf("enqueue: got %d, want 2", jobs.calls)
 	}
 
 	listed, err := docs.List(ctx, "papers-uuid")
@@ -134,7 +167,8 @@ func TestReconcileIgnoresOtherPrefix(t *testing.T) {
 		}
 	}
 	docs := newFakeDocs()
-	r := New(mem, docs)
+	jobs := newFakeJobs()
+	r := rec(mem, docs, jobs)
 
 	n, err := r.Reconcile(ctx, papers())
 	if err != nil {
@@ -150,10 +184,13 @@ func TestReconcileIgnoresOtherPrefix(t *testing.T) {
 	if len(listed) != 0 {
 		t.Fatalf("documents: got %d, want 0", len(listed))
 	}
+	if jobs.calls != 0 {
+		t.Fatalf("enqueue: got %d, want 0", jobs.calls)
+	}
 }
 
 func TestReconcileRequiresCollectionAndPrefix(t *testing.T) {
-	r := New(storage.NewMemory(), newFakeDocs())
+	r := rec(storage.NewMemory(), newFakeDocs(), nil)
 	ctx := context.Background()
 
 	if _, err := r.Reconcile(ctx, collection.Collection{SourcePrefix: "collections/papers"}); !errors.Is(err, ErrInvalidCollection) {
@@ -182,7 +219,8 @@ func TestReconcileAllInsertsPerCollection(t *testing.T) {
 		t.Fatal(err)
 	}
 	docs := newFakeDocs()
-	r := New(mem, docs)
+	jobs := newFakeJobs()
+	r := rec(mem, docs, jobs)
 
 	n, err := r.ReconcileAll(ctx, []collection.Collection{papers(), others()})
 	if err != nil {
@@ -203,7 +241,7 @@ func TestReconcileAllInsertsPerCollection(t *testing.T) {
 }
 
 func TestReconcileAllEmpty(t *testing.T) {
-	n, err := New(storage.NewMemory(), newFakeDocs()).ReconcileAll(context.Background(), nil)
+	n, err := rec(storage.NewMemory(), newFakeDocs(), nil).ReconcileAll(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +257,8 @@ func TestRunOnceListsCollections(t *testing.T) {
 		t.Fatal(err)
 	}
 	docs := newFakeDocs()
-	r := New(mem, docs)
+	jobs := newFakeJobs()
+	r := rec(mem, docs, jobs)
 
 	n, err := r.RunOnce(ctx, func(context.Context) ([]collection.Collection, error) {
 		return []collection.Collection{papers()}, nil
@@ -233,7 +272,7 @@ func TestRunOnceListsCollections(t *testing.T) {
 }
 
 func TestRunOnceRequiresLister(t *testing.T) {
-	_, err := New(storage.NewMemory(), newFakeDocs()).RunOnce(context.Background(), nil)
+	_, err := rec(storage.NewMemory(), newFakeDocs(), nil).RunOnce(context.Background(), nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}

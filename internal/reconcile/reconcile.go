@@ -29,18 +29,25 @@ type objects interface {
 	List(ctx context.Context, prefix string) ([]storage.Object, error)
 }
 
+type jobs interface {
+	EnqueuePending(ctx context.Context, doc document.Document) error
+}
+
+const statusPending = "pending"
+
 // Reconciler records objects under a collection prefix that have no ledger row.
 type Reconciler struct {
 	objects   objects
 	documents documents
+	jobs      jobs
 }
 
-func New(objects objects, documents documents) *Reconciler {
-	return &Reconciler{objects: objects, documents: documents}
+func New(objects objects, documents documents, jobs jobs) *Reconciler {
+	return &Reconciler{objects: objects, documents: documents, jobs: jobs}
 }
 
-// Reconcile inserts a pending documents row for each new object under coll.SourcePrefix.
-// It does not download, embed, or enqueue work. Returns how many rows were inserted.
+// Reconcile inserts a pending documents row for each new object under coll.SourcePrefix
+// and enqueues an ingest job for every pending row. Returns how many rows were inserted.
 func (r *Reconciler) Reconcile(ctx context.Context, coll collection.Collection) (int, error) {
 	if strings.TrimSpace(coll.ID) == "" {
 		return 0, ErrInvalidCollection
@@ -60,9 +67,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, coll collection.Collection) 
 		return 0, fmt.Errorf("list documents: %w", err)
 	}
 
-	seen := make(map[string]struct{}, len(existing))
+	seen := make(map[string]document.Document, len(existing))
 	for _, d := range existing {
-		seen[d.R2Key] = struct{}{}
+		seen[d.R2Key] = d
 	}
 
 	inserted := 0
@@ -70,23 +77,38 @@ func (r *Reconciler) Reconcile(ctx context.Context, coll collection.Collection) 
 		if !underPrefix(obj.Key, prefix) {
 			continue
 		}
-		if _, ok := seen[obj.Key]; ok {
+		if d, ok := seen[obj.Key]; ok {
+			if err := r.enqueueIfPending(ctx, d); err != nil {
+				return inserted, err
+			}
 			continue
 		}
 
-		_, err := r.documents.Create(ctx, coll.ID, "", obj.Key)
+		created, err := r.documents.Create(ctx, coll.ID, "", obj.Key)
 		if err != nil {
 			if errors.Is(err, document.ErrConflict) {
-				seen[obj.Key] = struct{}{}
 				continue
 			}
 			return inserted, fmt.Errorf("create document %s: %w", obj.Key, err)
 		}
-		seen[obj.Key] = struct{}{}
+		seen[obj.Key] = *created
+		if err := r.enqueueIfPending(ctx, *created); err != nil {
+			return inserted + 1, err
+		}
 		inserted++
 	}
 
 	return inserted, nil
+}
+
+func (r *Reconciler) enqueueIfPending(ctx context.Context, doc document.Document) error {
+	if doc.Status != statusPending {
+		return nil
+	}
+	if err := r.jobs.EnqueuePending(ctx, doc); err != nil {
+		return fmt.Errorf("enqueue %s: %w", doc.R2Key, err)
+	}
+	return nil
 }
 
 // ReconcileAll runs Reconcile for each collection. Stops on the first error.

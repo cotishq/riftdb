@@ -13,6 +13,7 @@ import (
 	"github.com/cotishq/riftdb/internal/document"
 	"github.com/cotishq/riftdb/internal/reconcile"
 	"github.com/cotishq/riftdb/internal/storage"
+	"github.com/cotishq/riftdb/internal/worker"
 )
 
 func main() {
@@ -43,7 +44,9 @@ func main() {
 
 	collSvc := collection.NewService(collection.NewRepository(pool))
 	docSvc := document.NewService(document.NewRepository(pool))
-	rec := reconcile.New(store, docSvc)
+	jobs := worker.NewClient(getenv("REDIS_ADDR", "localhost:6379"))
+	defer jobs.Close()
+	rec := reconcile.New(store, docSvc, jobs)
 
 	n, err := rec.RunOnce(ctx, collSvc.List)
 	if err != nil {
